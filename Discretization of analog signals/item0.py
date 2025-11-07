@@ -54,15 +54,21 @@ def my_fun(x):
     else:
         return np.sin(x) / x
 
-# Применить функцию к массиву и построить график
-y = np.array([my_fun(val) for val in x])
+# Создать массив значений для x от -20 до 20 с шагом 0.1
+x_values = np.arange(-20, 20, 0.1)
 
+# Применить функцию к массиву
+y_values = np.array([my_fun(val) for val in x_values])
+
+# Построить график функции sin(x)/x
 plt.figure(figsize=[12, 5])
-plt.plot(k, y)
-plt.xlabel("k")
-plt.ylabel("y[k]")
-plt.title("График y[k] = sin(x[k])/x[k]")
+plt.plot(x_values, y_values, 'b-', linewidth=2)
+plt.xlabel("x")
+plt.ylabel("sin(x)/x")
+plt.title("График функции sin(x)/x")
 plt.grid(True)
+plt.axhline(y=0, color='k', linestyle='-', alpha=0.3)  # Горизонтальная линия y=0
+plt.axvline(x=0, color='k', linestyle='-', alpha=0.3)  # Вертикальная линия x=0
 plt.show()
 
 # 10) Создать массив комплексной экспоненциальной функции
