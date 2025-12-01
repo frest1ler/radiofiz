@@ -1,421 +1,208 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy import integrate
+from scipy.fft import fft, fftfreq, fftshift
+from scipy.signal import windows
 
-def quantize_uniform(x, quant_min=-1, quant_max=1, quant_level=5):
-    """Uniform quantization approach"""
-    x_normalize = (x-quant_min) * (quant_level-1) / (quant_max-quant_min)
-    x_normalize[x_normalize > quant_level - 1] = quant_level - 1
-    x_normalize[x_normalize < 0] = 0
-    x_normalize_quant = np.around(x_normalize)
-    x_quant = (x_normalize_quant) * (quant_max-quant_min) / (quant_level-1) + quant_min
-    return x_quant
+# Параметры для варианта 1
+f0 = 10e3  # 10 кГц
+tau = 500e-6  # 500 мкс
 
-# Задача 2.3. Исследование гауссова импульса
+# Частота дискретизации (должна быть больше 2*f0 по теореме Найквиста)
+fs = 10 * f0  # 100 кГц
+N = int(fs * tau)  # Количество точек в сигнале
+t = np.linspace(0, tau, N, endpoint=False)  # Временная ось
 
-print("Задача 2.3. Исследование гауссова импульса")
+# 1. Сигнал с прямоугольным окном
+x_rect = np.sin(2 * np.pi * f0 * t)
+
+# 2. Сигнал с окном Ханна
+hann_window = windows.hann(N)
+x_hann = np.sin(2 * np.pi * f0 * t) * hann_window
+
+# 3. Бесконечная синусоида (для сравнения, берем тот же отрезок времени)
+x_periodic = np.sin(2 * np.pi * f0 * t)
+
+# Вычисление преобразования Фурье
+def compute_spectrum(x, fs):
+    """Вычисляет спектр сигнала x"""
+    N = len(x)
+    # Применяем FFT с дополнением нулями для лучшего разрешения
+    N_fft = 2**16
+    X = fft(x, N_fft)
+    # Частотная ось
+    freqs = fftfreq(N_fft, 1/fs)
+    # Возвращаем положительные частоты
+    mask = freqs >= 0
+    return freqs[mask], np.abs(X)[mask]
+
+# Вычисляем спектры
+freqs_rect, X_rect = compute_spectrum(x_rect, fs)
+freqs_hann, X_hann = compute_spectrum(x_hann, fs)
+freqs_per, X_per = compute_spectrum(x_periodic, fs)
+
+# Построение графиков
+plt.figure(figsize=(14, 10))
+
+# Сигналы во временной области
+plt.subplot(3, 2, 1)
+plt.plot(t * 1e6, x_rect)
+plt.title(f'Отрезок синусоиды (прямоугольное окно)\nf0={f0/1e3} кГц, τ={tau*1e6} мкс')
+plt.xlabel('Время t, мкс')
+plt.ylabel('x(t), В')
+plt.grid(True)
+
+plt.subplot(3, 2, 2)
+plt.plot(t * 1e6, x_hann)
+plt.title('Отрезок синусоиды (окно Ханна)')
+plt.xlabel('Время t, мкс')
+plt.ylabel('x(t), В')
+plt.grid(True)
+
+# Спектры в линейном масштабе
+plt.subplot(3, 2, 3)
+plt.plot(freqs_rect / 1e3, X_rect * 1e6, label='Прямоугольное окно')
+plt.axvline(x=f0/1e3, color='r', linestyle='--', alpha=0.5, label=f'f0={f0/1e3} кГц')
+plt.title('Спектр (линейный масштаб)')
+plt.xlabel('Частота f, кГц')
+plt.ylabel('|X(f)|, мкВ/Гц')
+plt.legend()
+plt.grid(True)
+
+plt.subplot(3, 2, 4)
+plt.plot(freqs_hann / 1e3, X_hann * 1e6, label='Окно Ханна')
+plt.axvline(x=f0/1e3, color='r', linestyle='--', alpha=0.5, label=f'f0={f0/1e3} кГц')
+plt.title('Спектр (линейный масштаб)')
+plt.xlabel('Частота f, кГц')
+plt.ylabel('|X(f)|, мкВ/Гц')
+plt.legend()
+plt.grid(True)
+
+# Спектры в логарифмическом масштабе (для лучшего сравнения боковых лепестков)
+plt.subplot(3, 2, 5)
+plt.plot(freqs_rect / 1e3, 20 * np.log10(X_rect + 1e-12), label='Прямоугольное окно')
+plt.plot(freqs_hann / 1e3, 20 * np.log10(X_hann + 1e-12), label='Окно Ханна', alpha=0.8)
+plt.axvline(x=f0/1e3, color='r', linestyle='--', alpha=0.5, label=f'f0={f0/1e3} кГц')
+plt.title('Спектр (логарифмический масштаб)')
+plt.xlabel('Частота f, кГц')
+plt.ylabel('|X(f)|, дБ')
+plt.legend()
+plt.grid(True)
+plt.ylim([-100, 100])
+
+# Сравнение с идеальным периодическим сигналом
+plt.subplot(3, 2, 6)
+plt.plot(freqs_per / 1e3, X_per * 1e6, label='Бесконечная синусоида')
+plt.axvline(x=f0/1e3, color='r', linestyle='--', alpha=0.5, label=f'f0={f0/1e3} кГц')
+plt.title('Спектр бесконечной синусоиды (теоретический)')
+plt.xlabel('Частота f, кГц')
+plt.ylabel('|X(f)|, мкВ/Гц')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+# Анализ результатов
+print("=" * 60)
+print("АНАЛИЗ РЕЗУЛЬТАТОВ")
 print("=" * 60)
 
-# Параметры гауссова импульса
-def gaussian_pulse(t, tau):
-    """
-    Гауссов импульс
-    t - время
-    tau - параметр, связанный с шириной импульса
-    """
-    return np.exp(-(t**2) / (2 * (tau/4)**2))
+# 1. Положение главных максимумов
+def find_peak(freqs, spectrum):
+    """Находит положение максимума в спектре"""
+    idx_max = np.argmax(spectrum)
+    return freqs[idx_max]
 
-# Параметры для анализа
-tau = 1.0  # параметр ширины импульса
-t1, t2 = -3, 3  # временной интервал для анализа
+peak_rect = find_peak(freqs_rect, X_rect)
+peak_hann = find_peak(freqs_hann, X_hann)
 
-# Временная область
-t = np.linspace(t1, t2, 1000)
-x_t = gaussian_pulse(t, tau)
+print(f"1. Положение главных максимумов:")
+print(f"   - Прямоугольное окно: {peak_rect/1e3:.2f} кГц (теоретическое: {f0/1e3} кГц)")
+print(f"   - Окно Ханна: {peak_hann/1e3:.2f} кГц (теоретическое: {f0/1e3} кГц)")
+print(f"   Отклонение от f0: {abs(peak_rect - f0)/f0*100:.2f}% для прямоугольного окна")
+print()
 
-# Построение импульса во временной области
-plt.figure(figsize=[15, 10])
+# 2. Значение |X(f)| на частоте f0
+def find_value_at_freq(freqs, spectrum, target_freq):
+    """Находит значение спектра на заданной частоте"""
+    idx = np.argmin(np.abs(freqs - target_freq))
+    return spectrum[idx]
 
-plt.subplot(2, 2, 1)
-plt.plot(t, x_t, 'b-', linewidth=2)
-plt.xlabel("Время, с")
-plt.ylabel("Амплитуда")
-plt.title("Гауссов импульс во временной области")
-plt.grid(True, alpha=0.3)
+X_at_f0_rect = find_value_at_freq(freqs_rect, X_rect, f0)
+X_at_f0_hann = find_value_at_freq(freqs_hann, X_hann, f0)
 
-# Ширина на уровне 1/e и 1/2
-level_1e = 1/np.e
-level_half = 0.5
-t_1e = tau/4 * np.sqrt(2 * np.log(1/level_1e))
-t_half = tau/4 * np.sqrt(2 * np.log(1/level_half))
+print(f"2. Значение |X(f)| на частоте f0={f0/1e3} кГц:")
+print(f"   - Прямоугольное окно: {X_at_f0_rect*1e6:.2f} мкВ/Гц")
+print(f"   - Окно Ханна: {X_at_f0_hann*1e6:.2f} мкВ/Гц")
+print(f"   Отношение (Ханна/прямоугольное): {X_at_f0_hann/X_at_f0_rect:.3f}")
+print()
 
-plt.axhline(y=level_1e, color='r', linestyle='--', alpha=0.7, label=f'1/e ≈ {level_1e:.3f}')
-plt.axhline(y=level_half, color='g', linestyle='--', alpha=0.7, label=f'1/2 = {level_half:.1f}')
-plt.axvline(x=-t_1e, color='r', linestyle=':', alpha=0.5)
-plt.axvline(x=t_1e, color='r', linestyle=':', alpha=0.5)
-plt.axvline(x=-t_half, color='g', linestyle=':', alpha=0.5)
-plt.axvline(x=t_half, color='g', linestyle=':', alpha=0.5)
-plt.legend()
-
-# Частотная область - аналитическое решение
-f_analytic = np.linspace(-10, 10, 1000)
-# Спектр гауссова импульса: также гауссова функция
-sigma_t = tau/4  # стандартное отклонение во временной области
-sigma_f = 1/(2 * np.pi * sigma_t)  # стандартное отклонение в частотной области
-X_f_analytic = np.sqrt(2 * np.pi) * sigma_t * np.exp(-2 * (np.pi * f_analytic * sigma_t)**2)
-
-plt.subplot(2, 2, 2)
-plt.plot(f_analytic, np.abs(X_f_analytic), 'r-', linewidth=2, label='|X(f)|')
-plt.plot(f_analytic, X_f_analytic.real, 'g--', alpha=0.7, label='Re(X(f))')
-plt.xlabel("Частота, Гц")
-plt.ylabel("Амплитуда")
-plt.title("Спектр гауссова импульса (аналитический)")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-# Численное преобразование Фурье
-def fourier_transform_numeric(signal_func, f_band, tau, t1, t2):
-    """
-    Численное преобразование Фурье
-    """
-    X_f_numeric = []
-    for f in f_band:
-        integrand_real = lambda t: signal_func(t, tau) * np.cos(2 * np.pi * f * t)
-        integrand_imag = lambda t: signal_func(t, tau) * np.sin(2 * np.pi * f * t)
-        
-        real_part = integrate.quad(integrand_real, t1, t2)[0]
-        imag_part = integrate.quad(integrand_imag, t1, t2)[0]
-        
-        X_f_numeric.append(real_part + 1j * imag_part)
+# 3. Ширина главного лепестка на нулевом уровне
+def find_main_lobe_width(freqs, spectrum, peak_freq, threshold=0.01):
+    """Находит ширину главного лепестка на заданном уровне"""
+    # Ищем частоты, где спектр опускается ниже threshold от максимума
+    peak_idx = np.argmin(np.abs(freqs - peak_freq))
+    peak_value = spectrum[peak_idx]
     
-    return np.array(X_f_numeric)
-
-# Вычисление численного преобразования Фурье
-f_numeric = np.linspace(-10, 10, 200)
-X_f_numeric = fourier_transform_numeric(gaussian_pulse, f_numeric, tau, t1, t2)
-
-plt.subplot(2, 2, 3)
-plt.plot(f_numeric, np.abs(X_f_numeric), 'ro-', markersize=3, label='Численное |X(f)|')
-plt.plot(f_analytic, np.abs(X_f_analytic), 'b-', alpha=0.5, label='Аналитическое |X(f)|')
-plt.xlabel("Частота, Гц")
-plt.ylabel("Амплитуда")
-plt.title("Сравнение аналитического и численного спектра")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-# Анализ различных параметров ширины импульса
-tau_values = [0.5, 1.0, 2.0]
-colors = ['red', 'blue', 'green']
-
-plt.subplot(2, 2, 4)
-for i, tau_val in enumerate(tau_values):
-    sigma_t_val = tau_val/4
-    X_f_tau = np.sqrt(2 * np.pi) * sigma_t_val * np.exp(-2 * (np.pi * f_analytic * sigma_t_val)**2)
-    plt.plot(f_analytic, np.abs(X_f_tau), color=colors[i], 
-             label=f'τ={tau_val} с', linewidth=2)
-
-plt.xlabel("Частота, Гц")
-plt.ylabel("|X(f)|")
-plt.title("Спектр для различной ширины импульса")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-plt.tight_layout()
-plt.show()
-
-# Анализ свойств спектра
-print(f"\nАНАЛИЗ СВОЙСТВ СПЕКТРА ГАУССОВА ИМПУЛЬСА:")
-print("-" * 50)
-
-# Ширина на уровне 1/e во временной области
-sigma_t = tau/4
-width_time_1e = 2 * sigma_t * np.sqrt(2 * np.log(1/level_1e))
-print(f"Ширина импульса на уровне 1/e: {width_time_1e:.2f} с")
-
-# Ширина на уровне 1/e в частотной области
-sigma_f = 1/(2 * np.pi * sigma_t)
-width_freq_1e = 2 * sigma_f * np.sqrt(2 * np.log(1/level_1e))
-print(f"Ширина спектра на уровне 1/e: {width_freq_1e:.2f} Гц")
-
-# Произведение время-частота (принцип неопределенности)
-time_bandwidth_product = width_time_1e * width_freq_1e
-print(f"Произведение время-частота: {time_bandwidth_product:.4f}")
-
-# Теоретический минимум по принципу неопределенности
-uncertainty_minimum = 1/(4 * np.pi)
-print(f"Теоретический минимум (1/4π): {uncertainty_minimum:.4f}")
-
-# Сравнение с прямоугольным и треугольным импульсами
-print(f"\nСРАВНЕНИЕ С ДРУГИМИ ИМПУЛЬСАМИ:")
-rectangular_spectrum = tau * np.sinc(f_analytic * tau)
-triangular_spectrum = (tau/2) * (np.sinc(f_analytic * tau/2))**2
-
-plt.figure(figsize=[12, 5])
-
-plt.subplot(1, 2, 1)
-plt.plot(f_analytic, np.abs(X_f_analytic), 'b-', linewidth=2, label='Гауссов')
-plt.plot(f_analytic, np.abs(rectangular_spectrum), 'r--', linewidth=2, label='Прямоугольный')
-plt.plot(f_analytic, np.abs(triangular_spectrum), 'g-.', linewidth=2, label='Треугольный')
-plt.xlabel("Частота, Гц")
-plt.ylabel("|X(f)|")
-plt.title("Сравнение спектров импульсов")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-plt.subplot(1, 2, 2)
-# В логарифмическом масштабе
-plt.semilogy(f_analytic, np.abs(X_f_analytic), 'b-', linewidth=2, label='Гауссов')
-plt.semilogy(f_analytic, np.abs(rectangular_spectrum), 'r--', linewidth=2, label='Прямоугольный')
-plt.semilogy(f_analytic, np.abs(triangular_spectrum), 'g-.', linewidth=2, label='Треугольный')
-plt.xlabel("Частота, Гц")
-plt.ylabel("|X(f)| (лог. шкала)")
-plt.title("Сравнение спектров (лог. масштаб)")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-plt.tight_layout()
-plt.show()
-
-# Анализ скорости затухания спектра
-print(f"\nАНАЛИЗ СКОРОСТИ ЗАТУХАНИЯ СПЕКТРА:")
-f_large = np.linspace(5, 50, 1000)
-spectrum_large_f = np.abs(np.sqrt(2 * np.pi) * sigma_t * np.exp(-2 * (np.pi * f_large * sigma_t)**2))
-
-plt.figure(figsize=[10, 4])
-plt.loglog(f_large, spectrum_large_f, 'b-', linewidth=2, label='Гауссов спектр')
-plt.loglog(f_large, 1/(f_large**1), 'r--', linewidth=1, label='~1/f (прямоугольный)')
-plt.loglog(f_large, 1/(f_large**2), 'g--', linewidth=1, label='~1/f² (треугольный)')
-plt.loglog(f_large, np.exp(-f_large**2), 'm--', linewidth=1, label='~exp(-f²) (гауссов)')
-plt.xlabel("Частота, Гц (лог. шкала)")
-plt.ylabel("|X(f)| (лог. шкала)")
-plt.title("Затухание спектра на высоких частотах")
-plt.grid(True, alpha=0.3)
-plt.legend()
-plt.show()
-
-print(f"Скорость затухания: экспоненциальная ~exp(-f²) (самая быстрая)")
-
-# Энергетический анализ
-print(f"\nЭНЕРГЕТИЧЕСКИЙ АНАЛИЗ:")
-energy_time = integrate.quad(lambda t: gaussian_pulse(t, tau)**2, -np.inf, np.inf)[0]
-print(f"Полная энергия во временной области: {energy_time:.4f}")
-
-# Теоретическая энергия гауссова импульса
-energy_theoretical = np.sqrt(np.pi) * sigma_t
-print(f"Теоретическая энергия: {energy_theoretical:.4f}")
-
-# По теореме Парсеваля
-energy_freq = integrate.quad(lambda f: np.abs(np.sqrt(2 * np.pi) * sigma_t * 
-                             np.exp(-2 * (np.pi * f * sigma_t)**2))**2, -np.inf, np.inf)[0]
-print(f"Энергия в частотной области (Парсеваль): {energy_freq:.4f}")
-
-# Дискретизация гауссова импульса
-print(f"\nДИСКРЕТИЗАЦИЯ ГАУССОВА ИМПУЛЬСА:")
-print("-" * 50)
-
-# Определим эффективную ширину импульса (на уровне 0.01 от максимума)
-effective_width = 2 * sigma_t * np.sqrt(2 * np.log(100))
-fs_values = [2/effective_width, 4/effective_width, 8/effective_width, 16/effective_width]
-
-plt.figure(figsize=[15, 10])
-
-for i, fs in enumerate(fs_values):
-    # Дискретизация
-    T = 1/fs
-    n = np.arange(int(t1/T), int(t2/T))
-    t_n = n * T
-    x_n = gaussian_pulse(t_n, tau)
+    # Ищем слева от пика
+    left_idx = peak_idx
+    while left_idx > 0 and spectrum[left_idx] > peak_value * threshold:
+        left_idx -= 1
     
-    plt.subplot(2, 2, i+1)
-    plt.plot(t, gaussian_pulse(t, tau), 'b-', linewidth=2, label='Аналоговый', alpha=0.7)
-    plt.stem(t_n, x_n, linefmt='r-', markerfmt='ro', basefmt=' ', 
-             label=f'Дискретный (fs={fs:.1f} Гц)')
-    plt.xlabel("Время, с")
-    plt.ylabel("Амплитуда")
-    plt.title(f"Дискретизация: fs={fs:.1f} Гц")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-
-plt.tight_layout()
-plt.show()
-
-# Анализ ошибки дискретизации и восстановления
-print(f"\nАНАЛИЗ ОШИБКИ ДИСКРЕТИЗАЦИИ И ВОССТАНОВЛЕНИЯ:")
-for fs in fs_values:
-    T = 1/fs
-    n = np.arange(int(t1/T), int(t2/T))
-    t_n = n * T
-    x_n = gaussian_pulse(t_n, tau)
+    # Ищем справа от пика
+    right_idx = peak_idx
+    while right_idx < len(spectrum) - 1 and spectrum[right_idx] > peak_value * threshold:
+        right_idx += 1
     
-    # Восстановление (идеальная интерполяция)
-    t_recon = np.linspace(t1, t2, 1000)
-    x_recon = np.zeros_like(t_recon)
+    left_freq = freqs[left_idx] if left_idx > 0 else freqs[0]
+    right_freq = freqs[right_idx] if right_idx < len(freqs) - 1 else freqs[-1]
     
-    for t_point, x_point in zip(t_n, x_n):
-        x_recon += x_point * np.sinc((t_recon - t_point) / T)
+    return right_freq - left_freq
+
+width_rect = find_main_lobe_width(freqs_rect, X_rect, peak_rect, threshold=0.01)
+width_hann = find_main_lobe_width(freqs_hann, X_hann, peak_hann, threshold=0.01)
+
+print(f"3. Ширина главного лепестка на уровне -40 дБ (примерно 1% от максимума):")
+print(f"   - Прямоугольное окно: {width_rect:.0f} Гц")
+print(f"   - Окно Ханна: {width_hann:.0f} Гц")
+print(f"   Отношение (Ханна/прямоугольное): {width_hann/width_rect:.2f}")
+print()
+
+# 4. Теоретические значения для сравнения
+print("4. Теоретические значения:")
+print(f"   а) Для прямоугольного окна:")
+print(f"      - Ширина главного лепестка: 2/τ = {2/tau:.0f} Гц")
+print(f"      - |X(f0)| ≈ τ/2 = {tau/2*1e6:.1f} мкВ/Гц")
+print()
+print(f"   б) Для окна Ханна:")
+print(f"      - Ширина главного лепестка: 4/τ = {4/tau:.0f} Гц")
+print(f"      - |X(f0)| ≈ 0.5 * (τ/2) = {0.5*tau/2*1e6:.1f} мкВ/Гц")
+print()
+print(f"   в) Для бесконечной синусоиды:")
+print(f"      - Спектр представляет собой дельта-функции на ±f0")
+print(f"      - Ширина главного лепестка: 0 Гц (идеально)")
+print()
+
+# 5. Сравнение боковых лепестков
+def find_sidelobe_level(freqs, spectrum, peak_freq, main_lobe_width):
+    """Находит уровень первого бокового лепестка"""
+    # Исключаем главный лепесток
+    mask = np.abs(freqs - peak_freq) > main_lobe_width/2
+    side_freqs = freqs[mask]
+    side_spectrum = spectrum[mask]
     
-    error = np.max(np.abs(gaussian_pulse(t_recon, tau) - x_recon))
-    rms_error = np.sqrt(np.mean((gaussian_pulse(t_recon, tau) - x_recon)**2))
-    
-    print(f"fs = {fs:5.1f} Гц: max ошибка = {error:.6f}, СКЗ = {rms_error:.6f}")
+    # Ищем максимум в оставшейся области
+    if len(side_spectrum) > 0:
+        side_max = np.max(side_spectrum)
+        peak_value = spectrum[np.argmin(np.abs(freqs - peak_freq))]
+        return 20 * np.log10(side_max/peak_value)
+    return None
 
-# Квантование гауссова импульса
-print(f"\nКВАНТОВАНИЕ ГАУССОВА ИМПУЛЬСА:")
-print("-" * 50)
+sidelobe_rect = find_sidelobe_level(freqs_rect, X_rect, peak_rect, width_rect)
+sidelobe_hann = find_sidelobe_level(freqs_hann, X_hann, peak_hann, width_hann)
 
-# Дискретизированный импульс
-fs = 20/effective_width  # высокая частота дискретизации
-T = 1/fs
-t_quant = np.linspace(-2, 2, 200)
-x_quant_original = gaussian_pulse(t_quant, tau)
-
-quant_levels = [8, 16, 32, 64]
-
-plt.figure(figsize=[15, 10])
-
-for i, levels in enumerate(quant_levels):
-    x_quantized = quantize_uniform(x_quant_original, quant_min=0, quant_max=1, 
-                                  quant_level=levels)
-    
-    plt.subplot(2, 2, i+1)
-    plt.plot(t_quant, x_quant_original, 'b-', linewidth=2, label='Исходный')
-    plt.stem(t_quant, x_quantized, linefmt='r-', markerfmt='ro', basefmt=' ', 
-             label=f'Квантованный (L={levels})')
-    
-    # Уровни квантования
-    quant_levels_vals = np.linspace(0, 1, levels + 1)
-    for level in quant_levels_vals[1:-1]:  # Пропускаем крайние уровни
-        plt.axhline(y=level, color='gray', linestyle='--', alpha=0.3)
-    
-    error = np.max(np.abs(x_quant_original - x_quantized))
-    plt.title(f'L={levels}, max ошибка={error:.4f}')
-    plt.xlabel("Время, с")
-    plt.ylabel("Амплитуда")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-
-plt.tight_layout()
-plt.show()
-
-# Анализ ошибок квантования
-print(f"\nАНАЛИЗ ОШИБОК КВАНТОВАНИЯ:")
-max_errors = []
-rms_errors = []
-snr_values = []
-
-for levels in quant_levels:
-    x_quantized = quantize_uniform(x_quant_original, quant_min=0, quant_max=1, 
-                                  quant_level=levels)
-    max_error = np.max(np.abs(x_quant_original - x_quantized))
-    rms_error = np.sqrt(np.mean((x_quant_original - x_quantized)**2))
-    
-    # SNR calculation
-    signal_power = np.mean(x_quant_original**2)
-    noise_power = np.mean((x_quant_original - x_quantized)**2)
-    snr = 10 * np.log10(signal_power / noise_power) if noise_power > 0 else float('inf')
-    
-    max_errors.append(max_error)
-    rms_errors.append(rms_error)
-    snr_values.append(snr)
-    
-    print(f"L = {levels:2d}: max ошибка = {max_error:.6f}, СКЗ = {rms_error:.6f}, SNR = {snr:6.2f} дБ")
-
-# График зависимости ошибки от числа уровней
-bits_per_sample = [np.log2(L) for L in quant_levels]
-plt.figure(figsize=[12, 4])
-
-plt.subplot(1, 2, 1)
-plt.plot(quant_levels, max_errors, 'ro-', label='Макс. ошибка')
-plt.plot(quant_levels, rms_errors, 'bs-', label='СКЗ ошибка')
-plt.xscale('log')
-plt.yscale('log')
-plt.xlabel("Число уровней квантования")
-plt.ylabel("Ошибка")
-plt.title("Зависимость ошибки от числа уровней")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-plt.subplot(1, 2, 2)
-plt.plot(bits_per_sample, snr_values, 'go-', linewidth=2)
-plt.xlabel("Бит на отсчет")
-plt.ylabel("SNR, дБ")
-plt.title("Зависимость SNR от битрейта")
-plt.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
-
-# Спектральные искажения от квантования
-print(f"\nСПЕКТРАЛЬНЫЕ ИСКАЖЕНИЯ ОТ КВАНТОВАНИЯ:")
-print("-" * 50)
-
-# Спектр исходного и квантованного сигнала
-f_spectrum = np.linspace(-15, 15, 500)
-
-# Исходный спектр
-spectrum_original = np.sqrt(2 * np.pi) * sigma_t * np.exp(-2 * (np.pi * f_spectrum * sigma_t)**2)
-
-# Спектр квантованного сигнала (для L=16)
-x_quant_L16 = quantize_uniform(x_quant_original, quant_min=0, quant_max=1, quant_level=16)
-spectrum_quantized = np.abs(np.fft.fftshift(np.fft.fft(x_quant_L16)))
-f_quant = np.fft.fftshift(np.fft.fftfreq(len(x_quant_L16), T)) * fs
-
-plt.figure(figsize=[12, 4])
-
-plt.subplot(1, 2, 1)
-plt.plot(f_spectrum, np.abs(spectrum_original), 'b-', linewidth=2, 
-         label='Исходный спектр')
-plt.plot(f_quant, spectrum_quantized/len(spectrum_quantized), 'r-', 
-         label='Квантованный (L=16)')
-plt.xlabel("Частота, Гц")
-plt.ylabel("|X(f)|")
-plt.title("Сравнение спектров")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-plt.subplot(1, 2, 2)
-# Спектральная плотность ошибки
-error_signal = x_quant_original - x_quant_L16
-spectrum_error = np.abs(np.fft.fftshift(np.fft.fft(error_signal)))
-plt.semilogy(f_quant, spectrum_error/len(spectrum_error), 'g-', linewidth=2)
-plt.xlabel("Частота, Гц")
-plt.ylabel("|E(f)| (лог. шкала)")
-plt.title("Спектр ошибки квантования")
-plt.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
-
-# Принцип неопределенности для различных импульсов
-print(f"\nПРИНЦИП НЕОПРЕДЕЛЕННОСТИ ДЛЯ РАЗЛИЧНЫХ ИМПУЛЬСОВ:")
-print("-" * 50)
-
-# Для прямоугольного импульса
-rect_width_time = tau
-rect_width_freq = 2/tau  # ширина главного лепестка
-rect_uncertainty = rect_width_time * rect_width_freq
-print(f"Прямоугольный: Δt·Δf = {rect_uncertainty:.4f}")
-
-# Для треугольного импульса
-triang_width_time = tau
-triang_width_freq = 4/tau  # ширина главного лепестка
-triang_uncertainty = triang_width_time * triang_width_freq
-print(f"Треугольный: Δt·Δf = {triang_uncertainty:.4f}")
-
-# Для гауссова импульса
-gauss_uncertainty = time_bandwidth_product
-print(f"Гауссов: Δt·Δf = {gauss_uncertainty:.4f}")
-
-print(f"Теоретический минимум: 1/4π = {1/(4*np.pi):.4f}")
-
-# ВЫВОДЫ
-print(f"\nВЫВОДЫ ПО ЗАДАЧЕ 2.3:")
+print(f"5. Уровень первого бокового лепестка относительно главного:")
+print(f"   - Прямоугольное окно: {sidelobe_rect:.1f} дБ")
+print(f"   - Окно Ханна: {sidelobe_hann:.1f} дБ")
+print(f"   Окно Ханна подавляет боковые лепестки лучше на {abs(sidelobe_rect) - abs(sidelobe_hann):.1f} дБ")
 print("=" * 60)
-
-print(f"\n1) СПЕКТР ГАУССОВА ИМПУЛЬСА:")
-print(f"   - Также имеет гауссову форму")
-print(f"   - Не имеет боковых лепестков")
-print(f"   - Затухает экспоненциально ~exp(-f²)")
-
-print(f"\n3) ДИСКРЕТИЗАЦИЯ:")
-print(f"   - Эффективная ширина: ~{effective_width:.2f} с")
