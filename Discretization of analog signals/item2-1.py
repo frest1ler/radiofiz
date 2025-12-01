@@ -1,303 +1,195 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.io import wavfile
-from scipy import integrate  
+from scipy.fft import fft, fftshift, fftfreq
+from scipy.signal import find_peaks
 
-def quantize_uniform(x, quant_min=-1, quant_max=1, quant_level=5):
-    """Uniform quantization approach"""
-    x_normalize = (x-quant_min) * (quant_level-1) / (quant_max-quant_min)
-    x_normalize[x_normalize > quant_level - 1] = quant_level - 1
-    x_normalize[x_normalize < 0] = 0
-    x_normalize_quant = np.around(x_normalize)
-    x_quant = (x_normalize_quant) * (quant_max-quant_min) / (quant_level-1) + quant_min
-    return x_quant
+# Параметры из условия (вариант 1: τ=100 мкс)
+tau = 100e-6  # 100 мкс
 
-# Задача 2.1. Исследование прямоугольного импульса
+# Функции окон во временной области
+def rect_window(t, tau):
+    return np.where(np.abs(t) <= tau/2, 1.0, 0.0)
 
-print("Задача 2.1. Исследование прямоугольного импульса")
-print("=" * 60)
+def tri_window(t, tau):
+    return np.where(np.abs(t) <= tau/2, 1 - np.abs(t)/(tau/2), 0.0)
 
-# Параметры прямоугольного импульса
-def rectangular_pulse(t, tau):
-    """
-    Прямоугольный импульс
-    t - время
-    tau - длительность импульса
-    """
-    return np.where((t >= -tau/2) & (t <= tau/2), 1, 0)
+def hann_window(t, tau):
+    return np.where(np.abs(t) <= tau/2, 
+                    0.5 * (1 + np.cos(2*np.pi * t / tau)), 
+                    0.0)
 
-# Параметры для анализа
-tau = 1.0  # длительность импульса
-t1, t2 = -2, 2  # временной интервал для анализа
+# Аналитические выражения для спектральных плотностей
+def rect_spectrum(f, tau):
+    """Спектр прямоугольного окна: X(f) = τ * sinc(πfτ)"""
+    # Избегаем деления на 0
+    mask = np.abs(f) < 1e-10
+    result = np.zeros_like(f, dtype=complex)
+    result[mask] = tau  # предел при f->0
+    result[~mask] = tau * np.sin(np.pi*f[~mask]*tau) / (np.pi*f[~mask]*tau)
+    return result
 
-# Временная область
-t = np.linspace(t1, t2, 1000)
-x_t = rectangular_pulse(t, tau)
+def tri_spectrum(f, tau):
+    """Спектр треугольного окна: X(f) = (τ/2) * sinc²(πfτ/2)"""
+    # Избегаем деления на 0
+    mask = np.abs(f) < 1e-10
+    result = np.zeros_like(f, dtype=complex)
+    result[mask] = tau/2  # предел при f->0
+    result[~mask] = (tau/2) * (np.sin(np.pi*f[~mask]*tau/2) / (np.pi*f[~mask]*tau/2))**2
+    return result
 
-# Построение импульса во временной области
-plt.figure(figsize=[15, 10])
-
-plt.subplot(2, 2, 1)
-plt.plot(t, x_t, 'b-', linewidth=2)
-plt.xlabel("Время, с")
-plt.ylabel("Амплитуда")
-plt.title("Прямоугольный импульс во временной области")
-plt.grid(True, alpha=0.3)
-plt.axvline(x=-tau/2, color='r', linestyle='--', alpha=0.7, label=f'τ={tau} с')
-plt.axvline(x=tau/2, color='r', linestyle='--', alpha=0.7)
-plt.legend()
-
-# Частотная область - аналитическое решение
-f_analytic = np.linspace(-10, 10, 1000)
-X_f_analytic = tau * np.sinc(f_analytic * tau)
-
-plt.subplot(2, 2, 2)
-plt.plot(f_analytic, np.abs(X_f_analytic), 'r-', linewidth=2, label='|X(f)|')
-plt.plot(f_analytic, X_f_analytic.real, 'g--', alpha=0.7, label='Re(X(f))')
-plt.xlabel("Частота, Гц")
-plt.ylabel("Амплитуда")
-plt.title("Спектр прямоугольного импульса (аналитический)")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-# Численное преобразование Фурье
-def fourier_transform_numeric(signal_func, f_band, tau, t1, t2, num_points=1000):
-    """
-    Численное преобразование Фурье
-    """
-    X_f_numeric = []
-    for f in f_band:
-        integrand_real = lambda t: signal_func(t, tau) * np.cos(2 * np.pi * f * t)
-        integrand_imag = lambda t: signal_func(t, tau) * np.sin(2 * np.pi * f * t)
-        
-        real_part = integrate.quad(integrand_real, t1, t2)[0]
-        imag_part = integrate.quad(integrand_imag, t1, t2)[0]
-        
-        X_f_numeric.append(real_part + 1j * imag_part)
+def hann_spectrum(f, tau):
+    """Спектр окна Ханна: X(f) = 0.5*τ*sinc(πfτ) / (1 - (fτ)²)"""
+    # Избегаем деления на 0
+    mask = np.abs(f) < 1e-10
+    result = np.zeros_like(f, dtype=complex)
+    result[mask] = tau/2  # предел при f->0
     
-    return np.array(X_f_numeric)
+    f_nonzero = f[~mask]
+    tau_f = tau * f_nonzero
+    result[~mask] = (tau/2) * np.sin(np.pi*tau_f) / (np.pi*tau_f) / (1 - tau_f**2)
+    return result
 
-# Вычисление численного преобразования Фурье
-f_numeric = np.linspace(-10, 10, 200)
-X_f_numeric = fourier_transform_numeric(rectangular_pulse, f_numeric, tau, t1, t2)
+# Диапазон частот для анализа
+N = 8192
+t = np.linspace(-tau, tau, N)
+f = fftshift(fftfreq(N, t[1]-t[0]))
 
-plt.subplot(2, 2, 3)
-plt.plot(f_numeric, np.abs(X_f_numeric), 'ro-', markersize=3, label='Численное |X(f)|')
-plt.plot(f_analytic, np.abs(X_f_analytic), 'b-', alpha=0.5, label='Аналитическое |X(f)|')
-plt.xlabel("Частота, Гц")
-plt.ylabel("Амплитуда")
-plt.title("Сравнение аналитического и численного спектра")
-plt.grid(True, alpha=0.3)
-plt.legend()
+# Вычисляем спектры
+rect_spec = rect_spectrum(f, tau)
+tri_spec = tri_spectrum(f, tau)
+hann_spec = hann_spectrum(f, tau)
 
-# Анализ различных длительностей импульса
-tau_values = [0.5, 1.0, 2.0]
-colors = ['red', 'blue', 'green']
+# Модули спектров
+rect_abs = np.abs(rect_spec)
+tri_abs = np.abs(tri_spec)
+hann_abs = np.abs(hann_spec)
 
-plt.subplot(2, 2, 4)
-for i, tau_val in enumerate(tau_values):
-    X_f_tau = tau_val * np.sinc(f_analytic * tau_val)
-    plt.plot(f_analytic, np.abs(X_f_tau), color=colors[i], 
-             label=f'τ={tau_val} с', linewidth=2)
+# Нормализация относительно X(0)
+rect_norm = rect_abs / rect_abs[f == 0]
+tri_norm = tri_abs / tri_abs[f == 0]
+hann_norm = hann_abs / hann_abs[f == 0]
 
-plt.xlabel("Частота, Гц")
-plt.ylabel("|X(f)|")
-plt.title("Спектр для различной длительности импульса")
-plt.grid(True, alpha=0.3)
-plt.legend()
+# Поиск боковых лепестков
+def find_first_sidelobe(spec, f_vals, main_lobe_width=1.5/tau):
+    """Находит первый боковой лепесток и его уровень в дБ"""
+    # Ищем только в области за пределами главного лепестка
+    mask = np.abs(f_vals) > main_lobe_width
+    spec_side = spec[mask]
+    f_side = f_vals[mask]
+    
+    # Ищем пики (максимумы)
+    peaks, properties = find_peaks(spec_side, height=0.01)
+    
+    if len(peaks) > 0:
+        # Первый пик - это первый боковой лепесток
+        first_peak_idx = peaks[0]
+        peak_val = spec_side[first_peak_idx]
+        # Уровень в дБ
+        level_db = 20 * np.log10(peak_val)
+        return level_db, f_side[first_peak_idx]
+    return None, None
+
+# Уровни первого бокового лепестка
+rect_level, rect_f_sidelobe = find_first_sidelobe(rect_norm, f, main_lobe_width=1.2/tau)
+tri_level, tri_f_sidelobe = find_first_sidelobe(tri_norm, f, main_lobe_width=2.2/tau)
+hann_level, hann_f_sidelobe = find_first_sidelobe(hann_norm, f, main_lobe_width=2.2/tau)
+
+# Ширина главного лепестка (по первым нулям)
+def find_main_lobe_width(spec, f_vals, threshold=0.01):
+    """Находит ширину главного лепестка по первым нулям"""
+    # Ищем только положительные частоты
+    pos_mask = f_vals >= 0
+    spec_pos = spec[pos_mask]
+    f_pos = f_vals[pos_mask]
+    
+    # Ищем точку, где спектр опускается ниже threshold
+    # и затем снова поднимается (это будет за пределами главного лепестка)
+    below_threshold = np.where(spec_pos < threshold)[0]
+    if len(below_threshold) > 0:
+        first_zero = below_threshold[0]
+        # Первый минимум - это граница главного лепестка
+        return 2 * f_pos[first_zero]  # умножаем на 2, т.к. симметрично
+    return None
+
+rect_width = find_main_lobe_width(rect_abs, f, threshold=rect_abs.max()*0.001)
+tri_width = find_main_lobe_width(tri_abs, f, threshold=tri_abs.max()*0.001)
+hann_width = find_main_lobe_width(hann_abs, f, threshold=hann_abs.max()*0.001)
+
+# Вывод результатов в таблицу
+print("Результаты для τ =", tau*1e6, "мкс")
+print("="*70)
+print(f"{'Окна':<15} {'Уровень 1-го бок. лепестка, дБ':<35} {'Ширина главн. лепестка, Гц':<30}")
+print("="*70)
+print(f"{'прямоугольное':<15} {rect_level:>8.2f}{'':<27} {rect_width:>8.1f}{'':<22}")
+print(f"{'треугольное':<15} {tri_level:>8.2f}{'':<27} {tri_width:>8.1f}{'':<22}")
+print(f"{'Ханна':<15} {hann_level:>8.2f}{'':<27} {hann_width:>8.1f}{'':<22}")
+print("="*70)
+
+# Построение графиков
+fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+
+# Временные области
+axes[0, 0].plot(t*1e6, rect_window(t, tau))
+axes[0, 0].set_title('Прямоугольное окно')
+axes[0, 0].set_xlabel('Время t, мкс')
+axes[0, 0].set_ylabel('w(t)')
+axes[0, 0].grid(True)
+
+axes[0, 1].plot(t*1e6, tri_window(t, tau))
+axes[0, 1].set_title('Треугольное окно')
+axes[0, 1].set_xlabel('Время t, мкс')
+axes[0, 1].set_ylabel('w(t)')
+axes[0, 1].grid(True)
+
+axes[0, 2].plot(t*1e6, hann_window(t, tau))
+axes[0, 2].set_title('Окно Ханна')
+axes[0, 2].set_xlabel('Время t, мкс')
+axes[0, 2].set_ylabel('w(t)')
+axes[0, 2].grid(True)
+
+# Частотные области (нормированные)
+f_khz = f / 1e3  # переводим в кГц
+
+axes[1, 0].plot(f_khz, 20*np.log10(rect_norm + 1e-10))
+axes[1, 0].set_title('Спектр прямоугольного окна')
+axes[1, 0].set_xlabel('Частота f, кГц')
+axes[1, 0].set_ylabel('|X(f)|/X(0), дБ')
+axes[1, 0].grid(True)
+axes[1, 0].set_ylim([-100, 5])
+
+axes[1, 1].plot(f_khz, 20*np.log10(tri_norm + 1e-10))
+axes[1, 1].set_title('Спектр треугольного окна')
+axes[1, 1].set_xlabel('Частота f, кГц')
+axes[1, 1].set_ylabel('|X(f)|/X(0), дБ')
+axes[1, 1].grid(True)
+axes[1, 1].set_ylim([-100, 5])
+
+axes[1, 2].plot(f_khz, 20*np.log10(hann_norm + 1e-10))
+axes[1, 2].set_title('Спектр окна Ханна')
+axes[1, 2].set_xlabel('Частота f, кГц')
+axes[1, 2].set_ylabel('|X(f)|/X(0), дБ')
+axes[1, 2].grid(True)
+axes[1, 2].set_ylim([-100, 5])
 
 plt.tight_layout()
 plt.show()
 
-# Анализ свойств спектра
-print(f"\nАНАЛИЗ СВОЙСТВ СПЕКТРА ПРЯМОУГОЛЬНОГО ИМПУЛЬСА:")
-print("-" * 50)
+# Аналитические формулы для теоретических нулей
+print("\nТеоретические положения нулей:")
+print("Прямоугольное окно: f = k/τ, k = ±1, ±2, ...")
+print("Треугольное окно: f = 2k/τ, k = ±1, ±2, ...")
+print("Окно Ханна: f = 2k/τ, k = ±1, ±2, ... (k ≠ 0)")
 
-# Нули спектра
-zeros_analytic = [n/tau for n in range(1, 6) if n/tau <= 10]
-print(f"Нули спектра (f ≠ 0): {[f'{zero:.2f} Гц' for zero in zeros_analytic]}")
+# Практические нули (из графика)
+print("\nПрактические положения первых нулей (из графика):")
+rect_zero_idx = np.where(np.abs(rect_norm[1:]) < 0.01)[0]
+if len(rect_zero_idx) > 0:
+    print(f"Прямоугольное окно: f ≈ {np.abs(f[rect_zero_idx[0]+1])/1e3:.2f} кГц")
 
-# Ширина главного лепестка
-main_lobe_width = 2/tau
-print(f"Ширина главного лепестка: {main_lobe_width:.2f} Гц")
+tri_zero_idx = np.where(np.abs(tri_norm[1:]) < 0.01)[0]
+if len(tri_zero_idx) > 0:
+    print(f"Треугольное окно: f ≈ {np.abs(f[tri_zero_idx[0]+1])/1e3:.2f} кГц")
 
-# Максимум спектра
-max_spectrum = tau
-print(f"Максимум спектра (f=0): {max_spectrum:.2f}")
-
-# Дополнительный анализ: энергия сигнала
-print(f"\nЭНЕРГЕТИЧЕСКИЙ АНАЛИЗ:")
-energy_time = integrate.quad(lambda t: rectangular_pulse(t, tau)**2, t1, t2)[0]
-print(f"Энергия во временной области: {energy_time:.4f}")
-
-# По теореме Парсеваля
-energy_freq = integrate.quad(lambda f: (tau * np.sinc(f * tau))**2, -np.inf, np.inf)[0]
-print(f"Энергия в частотной области (Парсеваль): {energy_freq:.4f}")
-
-# Анализ дискретизации прямоугольного импульса
-print(f"\nДИСКРЕТИЗАЦИЯ ПРЯМОУГОЛЬНОГО ИМПУЛЬСА:")
-print("-" * 50)
-
-# Параметры дискретизации
-fs_values = [2/tau, 4/tau, 8/tau]  # различные частоты дискретизации
-t_discrete = np.linspace(t1, t2, 1000)
-
-plt.figure(figsize=[15, 5])
-
-for i, fs in enumerate(fs_values):
-    # Дискретизация
-    T = 1/fs
-    n = np.arange(int(t1/T), int(t2/T))
-    t_n = n * T
-    x_n = rectangular_pulse(t_n, tau)
-    
-    plt.subplot(1, 3, i+1)
-    plt.plot(t_discrete, rectangular_pulse(t_discrete, tau), 'b-', 
-             linewidth=2, label='Аналоговый', alpha=0.7)
-    plt.stem(t_n, x_n, linefmt='r-', markerfmt='ro', basefmt=' ', 
-             label=f'Дискретный (fs={fs:.1f} Гц)')
-    plt.xlabel("Время, с")
-    plt.ylabel("Амплитуда")
-    plt.title(f"Дискретизация: fs={fs:.1f} Гц")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-
-plt.tight_layout()
-plt.show()
-
-# Анализ ошибки дискретизации
-print(f"\nАНАЛИЗ ОШИБКИ ДИСКРЕТИЗАЦИИ:")
-for fs in fs_values:
-    T = 1/fs
-    n = np.arange(int(t1/T), int(t2/T))
-    t_n = n * T
-    x_n = rectangular_pulse(t_n, tau)
-    
-    # Восстановление (идеальная интерполяция)
-    t_recon = np.linspace(t1, t2, 1000)
-    x_recon = np.zeros_like(t_recon)
-    
-    for t_point, x_point in zip(t_n, x_n):
-        x_recon += x_point * np.sinc((t_recon - t_point) / T)
-    
-    error = np.max(np.abs(rectangular_pulse(t_recon, tau) - x_recon))
-    print(f"fs = {fs:5.1f} Гц: максимальная ошибка = {error:.4f}")
-
-# Анализ квантования прямоугольного импульса
-print(f"\nКВАНТОВАНИЕ ПРЯМОУГОЛЬНОГО ИМПУЛЬСА:")
-print("-" * 50)
-
-# Дискретизированный импульс
-fs = 10/tau  # высокая частота дискретизации
-T = 1/fs
-t_quant = np.linspace(-tau, tau, 50)
-x_quant_original = rectangular_pulse(t_quant, tau)
-
-quant_levels = [2, 4, 8, 16]
-
-plt.figure(figsize=[15, 5])
-
-for i, levels in enumerate(quant_levels):
-    x_quantized = quantize_uniform(x_quant_original, quant_min=0, quant_max=1, 
-                                  quant_level=levels)
-    
-    plt.subplot(1, 4, i+1)
-    plt.stem(t_quant, x_quant_original, linefmt='b-', markerfmt='bo', 
-             basefmt=' ', label='Исходный')
-    plt.stem(t_quant, x_quantized, linefmt='r-', markerfmt='ro', 
-             basefmt=' ', label=f'Квантованный (L={levels})')
-    
-    # Уровни квантования
-    quant_levels_vals = np.linspace(0, 1, levels + 1)
-    for level in quant_levels_vals:
-        plt.axhline(y=level, color='gray', linestyle='--', alpha=0.3)
-    
-    error = np.max(np.abs(x_quant_original - x_quantized))
-    plt.title(f'L={levels}, ошибка={error:.3f}')
-    plt.xlabel("Время, с")
-    plt.ylabel("Амплитуда")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-
-plt.tight_layout()
-plt.show()
-
-# Анализ ошибок квантования
-print(f"\nАНАЛИЗ ОШИБОК КВАНТОВАНИЯ:")
-for levels in quant_levels:
-    x_quantized = quantize_uniform(x_quant_original, quant_min=0, quant_max=1, 
-                                  quant_level=levels)
-    max_error = np.max(np.abs(x_quant_original - x_quantized))
-    rms_error = np.sqrt(np.mean((x_quant_original - x_quantized)**2))
-    
-    print(f"L = {levels:2d}: max ошибка = {max_error:.4f}, СКЗ = {rms_error:.4f}")
-
-# Исследование спектральных искажений от квантования
-print(f"\nСПЕКТРАЛЬНЫЕ ИСКАЖЕНИЯ ОТ КВАНТОВАНИЯ:")
-print("-" * 50)
-
-# Спектр исходного и квантованного сигнала
-f_spectrum = np.linspace(-20, 20, 500)
-
-# Исходный спектр
-spectrum_original = tau * np.sinc(f_spectrum * tau)
-
-# Спектр квантованного сигнала (для L=4)
-x_quant_L4 = quantize_uniform(x_quant_original, quant_min=0, quant_max=1, quant_level=4)
-# Аппроксимация спектра квантованного сигнала через FFT
-spectrum_quantized = np.abs(np.fft.fftshift(np.fft.fft(x_quant_L4)))
-f_quant = np.fft.fftshift(np.fft.fftfreq(len(x_quant_L4), T)) * fs
-
-plt.figure(figsize=[12, 4])
-
-plt.subplot(1, 2, 1)
-plt.plot(f_spectrum, np.abs(spectrum_original), 'b-', linewidth=2, 
-         label='Исходный спектр')
-plt.plot(f_quant, spectrum_quantized/len(spectrum_quantized), 'r-', 
-         label='Квантованный (L=4)')
-plt.xlabel("Частота, Гц")
-plt.ylabel("|X(f)|")
-plt.title("Сравнение спектров")
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-plt.subplot(1, 2, 2)
-spectral_error = np.interp(f_quant, f_spectrum, np.abs(spectrum_original)) - spectrum_quantized/len(spectrum_quantized)
-plt.plot(f_quant, spectral_error, 'g-', linewidth=2)
-plt.xlabel("Частота, Гц")
-plt.ylabel("Ошибка спектра")
-plt.title("Спектральная ошибка от квантования")
-plt.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
-
-# ВЫВОДЫ
-print(f"\nВЫВОДЫ ПО ЗАДАЧЕ 2.1:")
-print("=" * 60)
-
-print(f"\n1) СПЕКТР ПРЯМОУГОЛЬНОГО ИМПУЛЬСА:")
-print(f"   - Имеет форму sinc-функции: X(f) = τ·sinc(fτ)")
-print(f"   - Нули спектра: f = n/τ, n = ±1, ±2, ...")
-print(f"   - Ширина главного лепестка: 2/τ Гц")
-print(f"   - Чем короче импульс, тем шире спектр")
-
-print(f"\n2) ДИСКРЕТИЗАЦИЯ:")
-print(f"   - Для точного восстановления требуется fs > 2/τ")
-print(f"   - При fs < 2/τ возникают значительные искажения")
-print(f"   - Рекомендуемая fs ≥ 4/τ для качественного восстановления")
-
-print(f"\n3) КВАНТОВАНИЕ:")
-print(f"   - Прямоугольный импульс хорошо квантуется")
-print(f"   - Максимальная ошибка ≈ шаг_квантования/2")
-print(f"   - Для L=16 уровней ошибка < 3%")
-
-print(f"\n4) СПЕКТРАЛЬНЫЕ ИСКАЖЕНИЯ:")
-print(f"   - Квантование вносит высокочастотные составляющие")
-print(f"   - Основная энергия сохраняется в главном лепестке")
-print(f"   - Искажения наиболее заметны на краях спектра")
-
-print(f"\n5) ПРАКТИЧЕСКИЕ РЕКОМЕНДАЦИИ:")
-print(f"   - Для импульсных сигналов: fs ≥ 4/τ_max")
-print(f"   - Уровни квантования: L ≥ 16 для точности < 3%")
-print(f"   - Учитывать ширину спектра при выборе fs")
+hann_zero_idx = np.where(np.abs(hann_norm[1:]) < 0.01)[0]
+if len(hann_zero_idx) > 0:
+    print(f"Окно Ханна: f ≈ {np.abs(f[hann_zero_idx[0]+1])/1e3:.2f} кГц")
